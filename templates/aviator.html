@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Авиатор</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #1e1e2f, #2d2d44);
+            color: white;
+            margin: 0;
+            padding: 20px;
+            height: 100vh;
+        }
+        .game-container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .balance {
+            background: rgba(0, 184, 148, 0.2);
+            padding: 10px 15px;
+            border-radius: 10px;
+            font-weight: bold;
+        }
+        .game-area {
+            height: 300px;
+            background: linear-gradient(180deg, #0984e3, #6c5ce7);
+            border-radius: 10px;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .airplane {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 60px;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ffffff"><path d="M22 16.21v-1.895L14 8V4a2 2 0 0 0-4 0v4l-8 6.315v1.895l8-2.526V18l-2 2v2l3.5-1 3.5 1v-2l-2-2v-4.316l8 2.526z"/></svg>');
+            background-size: contain;
+            transition: all 0.5s ease;
+        }
+        .multiplier {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .bet-control {
+            display: flex;
+            gap: 10px;
+        }
+        input {
+            flex: 1;
+            padding: 15px;
+            border-radius: 10px;
+            border: none;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+        button {
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .btn-bet {
+            background: #6c5ce7;
+            color: white;
+        }
+        .btn-cashout {
+            background: #00b894;
+            color: white;
+        }
+        .btn-auto {
+            background: #d63031;
+            color: white;
+        }
+        .history {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            overflow-x: auto;
+        }
+        .history-item {
+            min-width: 50px;
+            padding: 5px;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .win {
+            background: rgba(0, 184, 148, 0.3);
+        }
+        .lose {
+            background: rgba(214, 48, 49, 0.3);
+        }
+        .message {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 25px;
+            border-radius: 10px;
+            background: #00b894;
+            color: white;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .show {
+            opacity: 1;
+        }
+        .error {
+            background: #d63031;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="header">
+            <h1>🛩️ Авиатор</h1>
+            <div class="balance">💰 <span id="balance">1000</span>₽</div>
+        </div>
+        
+        <div class="game-area">
+            <div class="multiplier" id="multiplier">1.00x</div>
+            <div class="airplane" id="airplane"></div>
+        </div>
+        
+        <div class="controls">
+            <div class="bet-control">
+                <input type="number" id="bet-amount" min="10" value="100" placeholder="Сумма ставки">
+                <button class="btn-bet" id="btn-bet">СТАВКА</button>
+            </div>
+            <button class="btn-cashout" id="btn-cashout" disabled>ЗАБРАТЬ</button>
+            <button class="btn-auto" id="btn-auto">АВТО (2x)</button>
+        </div>
+        
+        <div class="history" id="history"></div>
+    </div>
+    
+    <div class="message" id="message"></div>
+    
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        
+        let gameState = {
+            balance: 1000,
+            betAmount: 100,
+            isPlaying: false,
+            multiplier: 1.0,
+            autoCashout: 0,
+            crashPoint: 0,
+            interval: null,
+            user: tg.initDataUnsafe?.user || { id: Math.floor(Math.random() * 1000000) }
+        };
+        
+        const elements = {
+            balance: document.getElementById('balance'),
+            betAmount: document.getElementById('bet-amount'),
+            btnBet: document.getElementById('btn-bet'),
+            btnCashout: document.getElementById('btn-cashout'),
+            btnAuto: document.getElementById('btn-auto'),
+            multiplier: document.getElementById('multiplier'),
+            airplane: document.getElementById('airplane'),
+            history: document.getElementById('history'),
+            message: document.getElementById('message')
+        };
+        
+        // Инициализация игры
+        async function initGame() {
+            try {
+                const response = await fetch('/api/init', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user: gameState.user })
+                });
+                
+                const data = await response.json();
+                
+                gameState.balance = data.balance;
+                gameState.autoCashout = data.auto_cashout || 0;
+                
+                updateBalance();
+                renderHistory(data.history || []);
+                
+                if (gameState.autoCashout > 0) {
+                    elements.btnAuto.textContent = `АВТО (${gameState.autoCashout}x)`;
+                    elements.btnAuto.classList.add('btn-cashout');
+                    elements.btnAuto.classList.remove('btn-auto');
+                }
+            } catch (error) {
+                showMessage('Ошибка загрузки данных', true);
+            }
+            
+            // Назначение обработчиков событий
+            elements.btnBet.addEventListener('click', placeBet);
+            elements.btnCashout.addEventListener('click', cashOut);
+            elements.btnAuto.addEventListener('click', toggleAutoCashout);
+            elements.betAmount.addEventListener('input', validateBet);
+        }
+        
+        // Размещение ставки
+        async function placeBet() {
+            if (gameState.isPlaying) {
+                showMessage('Завершите текущую игру!', true);
+                return;
+            }
+            
+            const betAmount = parseInt(elements.betAmount.value);
+            
+            if (betAmount < 10) {
+                showMessage('Минимальная ставка 10₽', true);
+                return;
+            }
+            
+            if (betAmount > gameState.balance) {
+                showMessage('Недостаточно средств', true);
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/bet', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user: gameState.user,
+                        bet_amount: betAmount
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    showMessage(data.error, true);
+                    return;
+                }
+                
+                gameState.balance = data.balance;
+                gameState.betAmount = betAmount;
+                gameState.isPlaying = true;
+                gameState.crashPoint = data.crash_point;
+                
+                updateBalance();
+                updateControls();
+                startGame();
+            } catch (error) {
+                showMessage('Ошибка при размещении ставки', true);
+            }
+        }
+        
+        // Забрать выигрыш
+        async function cashOut() {
+            if (!gameState.isPlaying) return;
+            
+            try {
+                const response = await fetch('/api/cashout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user: gameState.user,
+                        multiplier: parseFloat(gameState.multiplier.toFixed(2))
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    showMessage(data.error, true);
+                    return;
+                }
+                
+                gameState.balance = data.balance;
+                showMessage(`Вы выиграли ${Math.floor(gameState.betAmount * gameState.multiplier)}₽!`);
+                endGame(true);
+            } catch (error) {
+                showMessage('Ошибка при выводе средств', true);
+            }
+        }
+        
+        // Настройка авто-вывода
+        async function toggleAutoCashout() {
+            let newAutoCashout = 0;
+            
+            if (gameState.autoCashout === 0) {
+                newAutoCashout = 2.0;
+                showMessage(`Авто-вывод установлен на ${newAutoCashout}x`);
+            } else {
+                showMessage('Авто-вывод отключен');
+            }
+            
+            try {
+                const response = await fetch('/api/set_auto', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user: gameState.user,
+                        auto_cashout: newAutoCashout
+                    })
+                });
+                
+                const data = await response.json();
+                gameState.autoCashout = data.auto_cashout;
+                
+                if (gameState.autoCashout > 0) {
+                    elements.btnAuto.textContent = `АВТО (${gameState.autoCashout}x)`;
+                    elements.btnAuto.classList.add('btn-cashout');
+                    elements.btnAuto.classList.remove('btn-auto');
+                } else {
+                    elements.btnAuto.textContent = 'АВТО (2x)';
+                    elements.btnAuto.classList.add('btn-auto');
+                    elements.btnAuto.classList.remove('btn-cashout');
+                }
+            } catch (error) {
+                showMessage('Ошибка настройки авто-вывода', true);
+            }
+        }
+        
+        // Начало игры
+        function startGame() {
+            gameState.multiplier = 1.0;
+            elements.multiplier.textContent = '1.00x';
+            elements.airplane.style.bottom = '50px';
+            
+            // Анимация полета самолета
+            setTimeout(() => {
+                elements.airplane.style.bottom = 'calc(50% - 30px)';
+                
+                // Запуск игры
+                gameState.interval = setInterval(() => {
+                    gameState.multiplier += 0.01;
+                    elements.multiplier.textContent = gameState.multiplier.toFixed(2) + 'x';
+                    
+                    // Проверка авто-вывода
+                    if (gameState.autoCashout > 0 && gameState.multiplier >= gameState.autoCashout) {
+                        cashOut();
+                    }
+                    
+                    // Проверка краха
+                    if (gameState.multiplier >= gameState.crashPoint) {
+                        endGame(false);
+                        showMessage(`Самолет разбился! x${gameState.crashPoint.toFixed(2)}`, true);
+                    }
+                }, 50);
+            }, 1000);
+        }
+        
+        // Окончание игры
+        function endGame(win) {
+            clearInterval(gameState.interval);
+            gameState.isPlaying = false;
+            updateControls();
+            
+            if (!win) {
+                // Анимация взрыва
+                const explosion = document.createElement('div');
+                explosion.style.position = 'absolute';
+                explosion.style.width = '100px';
+                explosion.style.height = '100px';
+                explosion.style.background = 'radial-gradient(circle, rgba(255,200,0,0.8) 0%, rgba(255,100,0,0.6) 50%, rgba(255,0,0,0) 70%)';
+                explosion.style.borderRadius = '50%';
+                explosion.style.left = 'calc(50% - 50px)';
+                explosion.style.top = 'calc(50% - 50px)';
+                explosion.style.transform = 'scale(0)';
+                explosion.style.opacity = '0';
+                explosion.style.transition = 'all 0.5s';
+                
+                document.querySelector('.game-area').appendChild(explosion);
+                
+                setTimeout(() => {
+                    explosion.style.transform = 'scale(1)';
+                    explosion.style.opacity = '1';
+                }, 10);
+                
+                setTimeout(() => {
+                    explosion.style.transform = 'scale(1.5)';
+                    explosion.style.opacity = '0';
+                }, 300);
+                
+                setTimeout(() => {
+                    explosion.remove();
+                }, 800);
+                
+                // Обновление баланса
+                fetch('/api/cashout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user: gameState.user,
+                        multiplier: parseFloat(gameState.crashPoint.toFixed(2)),
+                        auto: true
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    gameState.balance = data.balance;
+                    updateBalance();
+                    renderHistory(data.history);
+                });
+            } else {
+                // Обновление истории
+                fetch('/api/init', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user: gameState.user })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    renderHistory(data.history);
+                });
+            }
+        }
+        
+        // Валидация ставки
+        function validateBet() {
+            const value = parseInt(elements.betAmount.value) || 0;
+            if (value < 10) elements.betAmount.value = 10;
+            if (value > gameState.balance) elements.betAmount.value = gameState.balance;
+        }
+        
+        // Обновление баланса
+        function updateBalance() {
+            elements.balance.textContent = gameState.balance;
+        }
+        
+        // Обновление элементов управления
+        function updateControls() {
+            elements.btnBet.disabled = gameState.isPlaying;
+            elements.btnCashout.disabled = !gameState.isPlaying;
+            elements.betAmount.disabled = gameState.isPlaying;
+        }
+        
+        // Отображение истории
+        function renderHistory(history) {
+            elements.history.innerHTML = '';
+            
+            history.forEach(item => {
+                const div = document.createElement('div');
+                div.className = `history-item ${item.win ? 'win' : 'lose'}`;
+                div.textContent = `${item.multiplier}x`;
+                elements.history.appendChild(div);
+            });
+        }
+        
+        // Показать сообщение
+        function showMessage(text, isError = false) {
+            elements.message.textContent = text;
+            elements.message.className = 'message';
+            if (isError) elements.message.classList.add('error');
+            elements.message.classList.add('show');
+            
+            setTimeout(() => {
+                elements.message.classList.remove('show');
+            }, 3000);
+        }
+        
+        // Инициализация при загрузке
+        document.addEventListener('DOMContentLoaded', initGame);
+    </script>
+</body>
+</html>
