@@ -116,7 +116,6 @@ def api_set_auto():
         'auto_cashout': user.auto_cashout
     })
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+
 
     
